@@ -4,7 +4,10 @@ import { io } from 'socket.io-client';
 
 // Dynamic production socket connection
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
-const socket = io(BACKEND_URL);
+const socket = io(BACKEND_URL, {
+  transports: ["websocket", "polling"],
+  withCredentials: true,
+});
 
 const ProffessorPortal = ({ username = "Professor" }) => {
   const [activeRoom, setActiveRoom] = useState(null);
