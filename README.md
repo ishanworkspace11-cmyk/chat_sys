@@ -1,6 +1,6 @@
 # CSE Connect
 
-I built **CSE Connect** as a full-stack, real-time communication portal for Computer Science departments. It acts as a secure broadcast channel connecting professors and students, completely locked down to official university email addresses.
+I built **CSE Connect** as a full-stack, real-time communication portal for role based messaging. It acts as a secure broadcast channel connecting professors and students, completely locked down to official university email addresses.
 
 ## Things I Learned & Engineering Challenges I Solved
 
