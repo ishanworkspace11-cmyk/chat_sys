@@ -1,22 +1,29 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
-import {GoogleOAuthProvider} from '@react-oauth/google'
-import Login from './Login'; 
-import ProffessorPortal from './ProffessorPortal';
-import StudentPortal from './StudentPortal';
+import { GoogleOAuthProvider } from '@react-oauth/google';
 import { io } from 'socket.io-client';
 
-// Connect to your Node backend
-const socket = io('http://localhost:5000');
+import Login from './Login';
+import ProffessorPortal from './ProffessorPortal';
+import StudentPortal from './StudentPortal';
 
-socket.on('connect', () => {
-  console.log('Connected to chat server!');
+const BACKEND_URL =
+  import.meta.env.VITE_BACKEND_URL ||
+  'http://localhost:5000';
+
+export const socket = io(BACKEND_URL, {
+  transports: ['websocket', 'polling']
 });
 
+socket.on('connect', () => {
+  console.log('Socket Connected');
+});
 
-const App = () => {
+function App() {
   return (
-    <GoogleOAuthProvider clientId={import.meta.env.VITE_GOOGLE_CLIENT_ID}>
+    <GoogleOAuthProvider
+      clientId={import.meta.env.VITE_GOOGLE_CLIENT_ID}
+    >
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Login />} />
