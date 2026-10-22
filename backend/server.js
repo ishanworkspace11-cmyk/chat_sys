@@ -4,167 +4,328 @@ const cors = require('cors');
 const http = require('http');
 const { Server } = require('socket.io');
 const mongoose = require('mongoose');
+const { OAuth2Client } = require('google-auth-library');
 
 const Message = require('./models/Message');
 const Announcement = require('./models/Announcement');
 
 const app = express();
 
-const FRONTEND_URL =
-  process.env.FRONTEND_URL || "http://localhost:5173";
+// ==========================================
+// 1. DYNAMIC CORS CONFIGURATION
+// ==========================================
+const defaultAllowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'http://localhost:5000',
+  'http://127.0.0.1:5173',
+  'https://collegeconnect-pi.vercel.app',
+  'https://chat-sys-xi.vercel.app',
+];
 
-app.use(cors({
-  origin: FRONTEND_URL,
-  credentials: true
-}));
+const envFrontendUrls = process.env.FRONTEND_URL
+  ? process.env.FRONTEND_URL.split(',').map((url) => url.trim().replace(/\/$/, ''))
+  : [];
 
+const allowedOrigins = Array.from(new Set([...defaultAllowedOrigins, ...envFrontendUrls].filter(Boolean)));
+
+const isOriginAllowed = (origin) => {
+  if (!origin) return true; // Server-to-server or tools without origin header
+  const normalized = origin.trim().replace(/\/$/, '');
+  if (allowedOrigins.includes(normalized)) return true;
+  // Allow all Vercel deployment preview and production URLs
+  if (/^https:\/\/[a-zA-Z0-9_-]+\.vercel\.app$/.test(normalized)) return true;
+  return false;
+};
+
+const corsOptions = {
+  origin: (origin, callback) => {
+    if (isOriginAllowed(origin)) {
+      callback(null, true);
+    } else {
+      console.warn(`[CORS Blocked] Origin: ${origin}`);
+      callback(new Error(`Origin ${origin} not allowed by CORS`));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
 
+// ==========================================
+// 2. SOCKET.IO SETUP
+// ==========================================
 const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: FRONTEND_URL,
-    methods: ["GET", "POST"],
-    credentials: true
-  }
+    origin: (origin, callback) => {
+      if (isOriginAllowed(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error(`Socket origin ${origin} not allowed by CORS`));
+      }
+    },
+    methods: ['GET', 'POST'],
+    credentials: true,
+  },
 });
 
 io.on('connection', (socket) => {
-  console.log(`A user connected: ${socket.id}`);
+  console.log(`[Socket Connected] ID: ${socket.id}`);
 
   socket.on('join_room', (roomName) => {
+    if (!roomName) return;
     socket.join(roomName);
-    console.log(`User ${socket.id} joined room: ${roomName}`);
+    console.log(`[Socket] ${socket.id} joined room: "${roomName}"`);
+  });
+
+  socket.on('leave_room', (roomName) => {
+    if (!roomName) return;
+    socket.leave(roomName);
+    console.log(`[Socket] ${socket.id} left room: "${roomName}"`);
   });
 
   socket.on('send_message', async (messageData) => {
     try {
+      if (!messageData || !messageData.room || !messageData.text) {
+        return;
+      }
+
+      const text = String(messageData.text).trim();
+      if (!text) return;
+
       const newMessage = new Message({
         room: messageData.room,
-        author: messageData.author,
-        text: messageData.text,
-        time: messageData.time
+        author: messageData.author || 'Anonymous',
+        text: text,
+        time:
+          messageData.time ||
+          new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        timestamp: new Date(),
       });
 
-      await newMessage.save();
+      const savedMessage = await newMessage.save();
 
-      socket.to(messageData.room).emit(
-        'receive_message',
-        messageData
-      );
-
+      // Broadcast to other users in the same room
+      socket.to(messageData.room).emit('receive_message', {
+        _id: savedMessage._id,
+        room: savedMessage.room,
+        author: savedMessage.author,
+        text: savedMessage.text,
+        time: savedMessage.time,
+        timestamp: savedMessage.timestamp,
+      });
     } catch (error) {
-      console.error(error);
+      console.error('[Socket Message Error]', error);
     }
   });
 
   socket.on('disconnect', () => {
-    console.log(`User disconnected: ${socket.id}`);
+    console.log(`[Socket Disconnected] ID: ${socket.id}`);
   });
 });
 
-mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log("MongoDB Connected"))
-  .catch(err => console.error(err));
+// ==========================================
+// 3. DATABASE CONNECTION
+// ==========================================
+if (process.env.MONGO_URI) {
+  mongoose
+    .connect(process.env.MONGO_URI)
+    .then(() => console.log('MongoDB Connected successfully.'))
+    .catch((err) => console.error('MongoDB Connection Error:', err.message));
+} else {
+  console.warn('WARNING: MONGO_URI is not defined in environment variables.');
+}
 
+// ==========================================
+// 4. REST API ROUTES
+// ==========================================
+
+// Health Check
+app.get('/api/health', (req, res) => {
+  res.status(200).json({
+    status: 'ok',
+    uptime: process.uptime(),
+    dbState: mongoose.connection.readyState,
+  });
+});
+
+app.get('/', (req, res) => {
+  res.send('CSE Connect Backend API is running.');
+});
+
+// Google OAuth Authentication
 app.post('/api/auth/google', async (req, res) => {
   const { token } = req.body;
 
-  try {
-    const { OAuth2Client } = require('google-auth-library');
+  if (!token) {
+    return res.status(400).json({
+      success: false,
+      message: 'Google ID token is required.',
+    });
+  }
 
-    const client = new OAuth2Client(
-      process.env.GOOGLE_CLIENT_ID
-    );
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  if (!clientId) {
+    return res.status(500).json({
+      success: false,
+      message: 'GOOGLE_CLIENT_ID is not configured on the server.',
+    });
+  }
+
+  try {
+    const client = new OAuth2Client(clientId);
 
     const ticket = await client.verifyIdToken({
       idToken: token,
-      audience: process.env.GOOGLE_CLIENT_ID
+      audience: clientId,
     });
 
     const payload = ticket.getPayload();
-
-    const email = payload.email;
-    const name = payload.name;
-
-    if (!email.endsWith('@mnnit.ac.in')) {
-      return res.status(403).json({
+    if (!payload || !payload.email) {
+      return res.status(401).json({
         success: false,
-        message:
-          'Access denied. You must use an official @mnnit.ac.in email address.'
+        message: 'Unable to extract email from Google token.',
       });
     }
 
-    let role = 'student';
+    const email = payload.email.toLowerCase().trim();
+    const name = payload.name || email.split('@')[0];
 
-    if (email === 'proff@mnnit.ac.in') {
+    // Restrict strictly to official MNNIT domain
+    if (!email.endsWith('@mnnit.ac.in')) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied. You must use an official @mnnit.ac.in email address.',
+      });
+    }
+
+    // Role identification
+    const defaultProfEmails = ['proff@mnnit.ac.in', 'prof@mnnit.ac.in'];
+    const envProfEmails = process.env.PROF_EMAILS
+      ? process.env.PROF_EMAILS.split(',').map((e) => e.trim().toLowerCase())
+      : [];
+    const profEmails = new Set([...defaultProfEmails, ...envProfEmails]);
+
+    let role = 'student';
+    if (
+      profEmails.has(email) ||
+      email.startsWith('prof.') ||
+      email.startsWith('faculty.')
+    ) {
       role = 'prof';
     }
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       role,
-      user: { name, email }
+      user: { name, email },
     });
-
   } catch (error) {
-    console.error(error);
-
-    res.status(401).json({
+    console.error('[Auth Error]', error.message);
+    return res.status(401).json({
       success: false,
-      message: 'Invalid or expired Google token'
+      message: 'Invalid or expired Google token: ' + error.message,
     });
   }
 });
 
+// Announcements Endpoints
 app.post('/api/announcements', async (req, res) => {
   try {
     const { title, content, author, targetGroup } = req.body;
+
+    if (!title || !content || !author || !targetGroup) {
+      return res.status(400).json({
+        success: false,
+        message: 'title, content, author, and targetGroup are required.',
+      });
+    }
 
     const announcement = new Announcement({
       title,
       content,
       author,
-      targetGroup
+      targetGroup,
     });
 
     await announcement.save();
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
-      announcement
+      announcement,
     });
-
   } catch (err) {
-    console.error(err);
-
-    res.status(500).json({
-      success: false
+    console.error('[Announcement Error]', err);
+    return res.status(500).json({
+      success: false,
+      message: err.message,
     });
   }
 });
 
+app.get('/api/announcements', async (req, res) => {
+  try {
+    const announcements = await Announcement.find().sort({ createdAt: -1 });
+    return res.status(200).json({
+      success: true,
+      data: announcements,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: err.message,
+    });
+  }
+});
+
+app.get('/api/announcements/:group', async (req, res) => {
+  try {
+    const { group } = req.params;
+    const announcements = await Announcement.find({
+      $or: [{ targetGroup: group }, { targetGroup: 'All' }],
+    }).sort({ createdAt: -1 });
+
+    return res.status(200).json({
+      success: true,
+      data: announcements,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: err.message,
+    });
+  }
+});
+
+// Messages History Endpoint
 app.get('/api/messages/:roomName', async (req, res) => {
   try {
-    const messages = await Message
-      .find({ room: req.params.roomName })
-      .sort({ timestamp: 1 });
+    const messages = await Message.find({ room: req.params.roomName }).sort({ timestamp: 1 });
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
-      data: messages
+      data: messages,
     });
-
   } catch (err) {
-    res.status(500).json({
-      success: false
+    console.error('[Messages History Error]', err);
+    return res.status(500).json({
+      success: false,
+      message: err.message,
     });
   }
 });
 
+// ==========================================
+// 5. SERVER INITIALIZATION
+// ==========================================
 const PORT = process.env.PORT || 5000;
 
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  console.log(`Configured allowed origins:`, allowedOrigins);
 });

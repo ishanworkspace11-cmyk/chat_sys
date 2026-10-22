@@ -1,32 +1,69 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import ChatRoom from './ChatRoom';
-import { io } from 'socket.io-client';
+import socket from './socket';
 
-// Dynamic production socket connection
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
-const socket = io(BACKEND_URL);
+function getInitialUser() {
+  try {
+    const userStr = localStorage.getItem('cse_user');
+    if (userStr) {
+      const parsed = JSON.parse(userStr);
+      return {
+        name: parsed.name || 'Student',
+        email: parsed.email || '',
+      };
+    }
+  } catch (e) {
+    console.error('Failed to parse user session:', e);
+  }
+  return { name: 'Student', email: '' };
+}
 
-const StudentPortal = ({ userName = "Student" }) => {
+const StudentPortal = () => {
+  const navigate = useNavigate();
   const [activeRoom, setActiveRoom] = useState(null);
+  const [currentUser] = useState(getInitialUser);
+
+  const handleLogout = () => {
+    localStorage.removeItem('cse_user');
+    navigate('/', { replace: true });
+  };
 
   return (
     <div className="flex flex-col min-h-screen bg-gray-50 p-6 items-center">
       <div className="w-full max-w-4xl">
         
-        <div className="flex justify-between items-center mb-8 bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8 bg-white p-6 rounded-xl shadow-sm border border-gray-100">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">CSE Student Portal</h1>
-            <p className="text-gray-500 text-sm mt-1">Welcome back, {userName}</p>
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl font-bold text-gray-900">CSE Student Portal</h1>
+              <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
+                Student
+              </span>
+            </div>
+            <p className="text-gray-500 text-sm mt-1">
+              Signed in as <span className="font-semibold text-gray-800">{currentUser.name}</span>
+              {currentUser.email && <span className="text-gray-400"> ({currentUser.email})</span>}
+            </p>
           </div>
           
-          {activeRoom && (
-            <button 
-              onClick={() => setActiveRoom(null)}
-              className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium rounded-lg transition-colors"
+          <div className="flex items-center gap-3">
+            {activeRoom && (
+              <button 
+                onClick={() => setActiveRoom(null)}
+                className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium rounded-lg transition-colors text-sm cursor-pointer"
+              >
+                ← Back to Groups
+              </button>
+            )}
+
+            <button
+              onClick={handleLogout}
+              className="px-4 py-2 bg-red-50 hover:bg-red-100 text-red-600 font-medium rounded-lg transition-colors border border-red-200 text-sm cursor-pointer"
             >
-              ← Back to Groups
+              Sign Out
             </button>
-          )}
+          </div>
         </div>
 
         {!activeRoom ? (
@@ -37,13 +74,16 @@ const StudentPortal = ({ userName = "Student" }) => {
                 <button 
                   key={group}
                   onClick={() => setActiveRoom(group)}
-                  className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 hover:border-[#3390EC] hover:shadow-md transition-all text-left group"
+                  className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 hover:border-[#3390EC] hover:shadow-md transition-all text-left group cursor-pointer"
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-lg font-bold text-gray-800 group-hover:text-[#3390EC] transition-colors">
-                      {group}
-                    </span>
-                    <span className="w-8 h-8 rounded-full bg-blue-50 text-[#3390EC] flex items-center justify-center transition-transform group-hover:translate-x-1">
+                    <div>
+                      <span className="text-lg font-bold text-gray-800 group-hover:text-[#3390EC] transition-colors block">
+                        {group}
+                      </span>
+                      <span className="text-xs text-gray-400 font-medium mt-1">Professor Broadcast Feed</span>
+                    </div>
+                    <span className="w-8 h-8 rounded-full bg-blue-50 text-[#3390EC] flex items-center justify-center transition-transform group-hover:translate-x-1 font-semibold">
                       →
                     </span>
                   </div>
@@ -55,7 +95,7 @@ const StudentPortal = ({ userName = "Student" }) => {
           <div className="flex justify-center w-full animate-in fade-in slide-in-from-bottom-4 duration-300">
             <ChatRoom 
               socket={socket} 
-              username={userName} 
+              username={currentUser.name} 
               room={activeRoom} 
               role="student" 
             />

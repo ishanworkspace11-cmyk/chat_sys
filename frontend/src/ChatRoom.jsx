@@ -1,102 +1,154 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 const ChatRoom = ({ socket, username, room, role }) => {
-  const [currentMessage, setCurrentMessage] = useState("");
+  const [currentMessage, setCurrentMessage] = useState('');
   const [messageList, setMessageList] = useState([]);
+  const [loadingHistory, setLoadingHistory] = useState(true);
   const messagesEndRef = useRef(null);
 
+  // Join room on mount and leave on unmount/room change
   useEffect(() => {
-    socket.emit("join_room", room);
+    if (!socket || !room) return;
+
+    socket.emit('join_room', room);
 
     const fetchMessageHistory = async () => {
+      setLoadingHistory(true);
       try {
-        // Dynamic production API call
         const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
-        const response = await fetch(`${BACKEND_URL}/api/messages/${room}`);
+        const response = await fetch(`${BACKEND_URL}/api/messages/${encodeURIComponent(room)}`);
         const result = await response.json();
-        
-        if (result.success) {
-          setMessageList(result.data); 
+
+        if (result.success && Array.isArray(result.data)) {
+          setMessageList(result.data);
         }
       } catch (error) {
-        console.error("Failed to fetch history:", error);
+        console.error('Failed to fetch message history:', error);
+      } finally {
+        setLoadingHistory(false);
       }
     };
 
     fetchMessageHistory();
+
+    return () => {
+      socket.emit('leave_room', room);
+    };
   }, [room, socket]);
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
   useEffect(() => {
     scrollToBottom();
   }, [messageList]);
 
-  const sendMessage = async () => {
-    if (currentMessage.trim() !== "") {
-      const messageData = {
-        room: room,
-        author: username,
-        text: currentMessage,
-        time: new Date(Date.now()).getHours() + ":" + 
-              String(new Date(Date.now()).getMinutes()).padStart(2, '0'),
-      };
+  // Listen for incoming messages targeted ONLY to this active room
+  useEffect(() => {
+    if (!socket) return;
 
-      await socket.emit("send_message", messageData);
-      setMessageList((list) => [...list, messageData]);
-      setCurrentMessage(""); 
-    }
+    const receiveMessageHandler = (data) => {
+      if (data && data.room === room) {
+        setMessageList((prevList) => [...prevList, data]);
+      }
+    };
+
+    socket.on('receive_message', receiveMessageHandler);
+
+    return () => {
+      socket.off('receive_message', receiveMessageHandler);
+    };
+  }, [socket, room]);
+
+  const formatCurrentTime = () => {
+    const now = new Date();
+    return now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
-  useEffect(() => {
-    const receiveMessageHandler = (data) => {
-      setMessageList((list) => [...list, data]);
+  const sendMessage = async () => {
+    const trimmed = currentMessage.trim();
+    if (!trimmed || !socket) return;
+
+    const messageData = {
+      room: room,
+      author: username || (role === 'prof' ? 'Professor' : 'Student'),
+      text: trimmed,
+      time: formatCurrentTime(),
     };
-    socket.on("receive_message", receiveMessageHandler);
-    return () => {
-      socket.off("receive_message", receiveMessageHandler);
-    };
-  }, [socket]);
+
+    // Optimistically display the sent message
+    setMessageList((list) => [...list, messageData]);
+    setCurrentMessage('');
+
+    socket.emit('send_message', messageData);
+  };
+
+  // Derive group badge label (e.g. "Group A" -> "A")
+  const getBadgeLetter = (name) => {
+    if (!name) return 'C';
+    const parts = name.trim().split(/\s+/);
+    return parts.length > 1 ? parts[parts.length - 1] : name.charAt(0);
+  };
 
   return (
-    <div className="flex flex-col w-full max-w-[400px] h-[880px] mx-auto bg-[#F9FAFB] sm:rounded-[40px] shadow-2xl border-[8px] border-gray-900 overflow-hidden relative">
+    <div className="flex flex-col w-full max-w-[440px] h-[78vh] min-h-[550px] max-h-[800px] mx-auto bg-[#F9FAFB] sm:rounded-[36px] shadow-xl border-4 sm:border-8 border-gray-900 overflow-hidden relative">
       
-      <div className="flex items-center gap-3 bg-white px-5 py-4 border-b border-gray-200 z-10">
-        <div className="w-11 h-11 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-lg">
-          {room.charAt(0)}
+      {/* Header */}
+      <div className="flex items-center gap-3 bg-white px-5 py-4 border-b border-gray-200 z-10 shadow-sm">
+        <div className="w-11 h-11 rounded-full bg-blue-100 flex items-center justify-center text-[#3390EC] font-bold text-lg shadow-inner">
+          {getBadgeLetter(room)}
         </div>
-        <div className="flex flex-col">
-          <h2 className="text-lg font-semibold text-gray-900 leading-tight">{room}</h2>
-          <span className="text-sm text-blue-500 font-medium">Official Broadcast</span>
+        <div className="flex flex-col flex-1 min-w-0">
+          <h2 className="text-lg font-bold text-gray-900 leading-tight truncate">{room}</h2>
+          <span className="text-xs text-[#3390EC] font-medium flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+            Official Faculty Broadcast
+          </span>
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 py-5 flex flex-col gap-4">
-        {messageList.length === 0 ? (
+      {/* Message Feed */}
+      <div className="flex-1 overflow-y-auto px-4 py-5 flex flex-col gap-3.5">
+        {loadingHistory ? (
           <div className="flex items-center justify-center h-full">
-            <div className="bg-gray-200 px-4 py-1.5 rounded-full text-sm text-gray-500 font-medium">
-              No messages here yet...
+            <div className="bg-gray-100 text-gray-500 px-4 py-2 rounded-full text-xs font-medium flex items-center gap-2">
+              <span className="w-3.5 h-3.5 border-2 border-gray-400 border-t-transparent rounded-full animate-spin"></span>
+              Loading messages...
+            </div>
+          </div>
+        ) : messageList.length === 0 ? (
+          <div className="flex items-center justify-center h-full">
+            <div className="bg-gray-100 border border-gray-200 px-4 py-2 rounded-full text-xs text-gray-500 font-medium">
+              No messages broadcasted yet.
             </div>
           </div>
         ) : (
           messageList.map((msg, index) => {
             const isMe = msg.author === username;
             return (
-              <div key={index} className={`flex flex-col ${isMe ? "items-end" : "items-start"}`}>
+              <div 
+                key={msg._id || `${msg.room}-${index}-${msg.time}`} 
+                className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}
+              >
                 {!isMe && (
-                  <span className="text-[13px] text-gray-500 ml-1 mb-1">{msg.author}</span>
+                  <span className="text-[12px] font-medium text-gray-600 ml-1.5 mb-1">
+                    {msg.author}
+                  </span>
                 )}
                 <div 
-                  className={`relative max-w-[85%] px-3.5 py-2.5 text-[15px] shadow-sm flex flex-col ${
+                  className={`relative max-w-[85%] px-4 py-2.5 text-[14px] shadow-sm flex flex-col ${
                     isMe 
-                      ? "bg-[#3390EC] text-white rounded-2xl rounded-br-sm" 
-                      : "bg-white text-gray-900 border border-gray-100 rounded-2xl rounded-bl-sm"
+                      ? 'bg-[#3390EC] text-white rounded-2xl rounded-br-sm' 
+                      : 'bg-white text-gray-900 border border-gray-200 rounded-2xl rounded-bl-sm'
                   }`}
                 >
-                  <p className="leading-relaxed pr-10 break-words">{msg.text}</p>
-                  <span className={`text-[11px] absolute bottom-1.5 right-2 ${isMe ? "text-blue-100" : "text-gray-400"}`}>
+                  <p className="leading-relaxed pr-10 break-words whitespace-pre-wrap">{msg.text}</p>
+                  <span 
+                    className={`text-[10px] self-end mt-1 ${
+                      isMe ? 'text-blue-100' : 'text-gray-400'
+                    }`}
+                  >
                     {msg.time}
                   </span>
                 </div>
@@ -107,34 +159,44 @@ const ChatRoom = ({ socket, username, room, role }) => {
         <div ref={messagesEndRef} />
       </div>
 
+      {/* Input or Student Read-Only Notice */}
       {role === 'prof' ? (
-        <div className="bg-white px-4 pb-8 pt-4 flex items-center gap-3 border-t border-gray-200 z-10">
+        <div className="bg-white px-4 py-3 flex items-center gap-2.5 border-t border-gray-200 z-10">
           <input
             type="text"
             value={currentMessage}
             onChange={(e) => setCurrentMessage(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && sendMessage()}
-            placeholder="Broadcast a message..."
-            className="flex-1 bg-gray-100 text-[16px] text-gray-900 rounded-full px-5 py-3.5 outline-none placeholder-gray-500 border border-transparent focus:bg-white focus:border-[#3390EC] focus:ring-2 focus:ring-blue-100 transition-all"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                sendMessage();
+              }
+            }}
+            placeholder="Broadcast announcement to group..."
+            className="flex-1 bg-gray-100 text-[14px] text-gray-900 rounded-full px-4 py-2.5 outline-none placeholder-gray-500 border border-transparent focus:bg-white focus:border-[#3390EC] focus:ring-2 focus:ring-blue-100 transition-all"
           />
           <button 
             onClick={sendMessage} 
             disabled={!currentMessage.trim()}
-            className={`rounded-full w-[60px] h-[25px] flex items-center justify-center flex-shrink-0 transition-all ${
+            title="Send Announcement"
+            className={`rounded-full w-10 h-10 flex items-center justify-center flex-shrink-0 transition-all ${
               currentMessage.trim() 
-                ? "bg-[#3390EC] text-white hover:bg-[#287ecf] shadow-md scale-100" 
-                : "bg-gray-200 text-gray-400 cursor-not-allowed scale-95"
+                ? 'bg-[#3390EC] text-white hover:bg-[#287ecf] shadow-md scale-100 cursor-pointer' 
+                : 'bg-gray-200 text-gray-400 cursor-not-allowed scale-95'
             }`}
           >
-            <svg className="w-4 h-4 translate-x-[-1px] translate-y-[1px]" fill="currentColor" viewBox="0 0 24 24">
+            <svg className="w-5 h-5 translate-x-[1px]" fill="currentColor" viewBox="0 0 24 24">
               <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"></path>
             </svg>
           </button>
         </div>
       ) : (
-        <div className="bg-gray-50 px-4 pb-10 pt-6 flex justify-center border-t border-gray-200 z-10">
-          <span className="text-gray-500 text-sm font-medium bg-gray-200 px-4 py-2 rounded-full">
-            Only professors can send messages here.
+        <div className="bg-gray-50 px-4 py-4 flex items-center justify-center border-t border-gray-200 z-10">
+          <span className="text-gray-500 text-xs font-medium bg-gray-200/80 px-3.5 py-1.5 rounded-full flex items-center gap-1.5">
+            <svg className="w-3.5 h-3.5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+            </svg>
+            Broadcast-only channel. Only professors can post here.
           </span>
         </div>
       )}
