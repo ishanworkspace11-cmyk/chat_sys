@@ -98,7 +98,7 @@ io.on('connection', (socket) => {
       const text = String(messageData.text).trim();
       if (!text) return;
 
-      const newMessage = new Message({
+      const payload = {
         room: messageData.room,
         author: messageData.author || 'Anonymous',
         text: text,
@@ -106,19 +106,18 @@ io.on('connection', (socket) => {
           messageData.time ||
           new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         timestamp: new Date(),
-      });
+      };
 
-      const savedMessage = await newMessage.save();
+      // 1. Immediately push real-time broadcast to all peers in the room
+      socket.to(messageData.room).emit('receive_message', payload);
 
-      // Broadcast to other users in the same room
-      socket.to(messageData.room).emit('receive_message', {
-        _id: savedMessage._id,
-        room: savedMessage.room,
-        author: savedMessage.author,
-        text: savedMessage.text,
-        time: savedMessage.time,
-        timestamp: savedMessage.timestamp,
-      });
+      // 2. Persist to MongoDB if connected
+      if (mongoose.connection.readyState === 1) {
+        const newMessage = new Message(payload);
+        await newMessage.save();
+      } else {
+        console.warn('[DB Warning] MongoDB not connected; message broadcasted but not persisted.');
+      }
     } catch (error) {
       console.error('[Socket Message Error]', error);
     }
@@ -130,16 +129,32 @@ io.on('connection', (socket) => {
 });
 
 // ==========================================
-// 3. DATABASE CONNECTION
+// 3. DATABASE CONNECTION & AUTO-RETRY
 // ==========================================
-if (process.env.MONGO_URI) {
-  mongoose
-    .connect(process.env.MONGO_URI)
-    .then(() => console.log('MongoDB Connected successfully.'))
-    .catch((err) => console.error('MongoDB Connection Error:', err.message));
-} else {
-  console.warn('WARNING: MONGO_URI is not defined in environment variables.');
-}
+const connectMongoDB = async () => {
+  if (!process.env.MONGO_URI) {
+    console.warn('WARNING: MONGO_URI is not defined in environment variables.');
+    return;
+  }
+
+  try {
+    await mongoose.connect(process.env.MONGO_URI, {
+      serverSelectionTimeoutMS: 5000,
+    });
+    console.log('MongoDB Connected successfully.');
+  } catch (err) {
+    console.error('MongoDB Connection Error:', err.message);
+    console.log('Retrying MongoDB connection in 15 seconds...');
+    setTimeout(connectMongoDB, 15000);
+  }
+};
+
+connectMongoDB();
+
+mongoose.connection.on('disconnected', () => {
+  console.warn('MongoDB disconnected. Attempting reconnection...');
+  setTimeout(connectMongoDB, 10000);
+});
 
 // ==========================================
 // 4. REST API ROUTES
@@ -151,6 +166,12 @@ app.get('/api/health', (req, res) => {
     status: 'ok',
     uptime: process.uptime(),
     dbState: mongoose.connection.readyState,
+    dbStatus:
+      mongoose.connection.readyState === 1
+        ? 'connected'
+        : mongoose.connection.readyState === 2
+        ? 'connecting'
+        : 'disconnected',
   });
 });
 
@@ -237,6 +258,13 @@ app.post('/api/auth/google', async (req, res) => {
 // Announcements Endpoints
 app.post('/api/announcements', async (req, res) => {
   try {
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({
+        success: false,
+        message: 'Database is disconnected. Please resume MongoDB Atlas cluster.',
+      });
+    }
+
     const { title, content, author, targetGroup } = req.body;
 
     if (!title || !content || !author || !targetGroup) {
@@ -270,6 +298,9 @@ app.post('/api/announcements', async (req, res) => {
 
 app.get('/api/announcements', async (req, res) => {
   try {
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(200).json({ success: true, data: [] });
+    }
     const announcements = await Announcement.find().sort({ createdAt: -1 });
     return res.status(200).json({
       success: true,
@@ -285,6 +316,9 @@ app.get('/api/announcements', async (req, res) => {
 
 app.get('/api/announcements/:group', async (req, res) => {
   try {
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(200).json({ success: true, data: [] });
+    }
     const { group } = req.params;
     const announcements = await Announcement.find({
       $or: [{ targetGroup: group }, { targetGroup: 'All' }],
@@ -305,6 +339,15 @@ app.get('/api/announcements/:group', async (req, res) => {
 // Messages History Endpoint
 app.get('/api/messages/:roomName', async (req, res) => {
   try {
+    // If database is disconnected or paused, return empty list with clear notice instead of hanging for 10s
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(200).json({
+        success: true,
+        data: [],
+        dbWarning: 'Database cluster is paused or reconnecting. Real-time messages are active.',
+      });
+    }
+
     const messages = await Message.find({ room: req.params.roomName }).sort({ timestamp: 1 });
 
     return res.status(200).json({
@@ -312,10 +355,11 @@ app.get('/api/messages/:roomName', async (req, res) => {
       data: messages,
     });
   } catch (err) {
-    console.error('[Messages History Error]', err);
+    console.error('[Messages History Error]', err.message);
     return res.status(500).json({
       success: false,
       message: err.message,
+      data: [],
     });
   }
 });

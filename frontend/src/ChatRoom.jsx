@@ -4,6 +4,7 @@ const ChatRoom = ({ socket, username, room, role }) => {
   const [currentMessage, setCurrentMessage] = useState('');
   const [messageList, setMessageList] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
+  const [dbWarning, setDbWarning] = useState('');
   const messagesEndRef = useRef(null);
 
   // Join room on mount and leave on unmount/room change
@@ -19,11 +20,20 @@ const ChatRoom = ({ socket, username, room, role }) => {
         const response = await fetch(`${BACKEND_URL}/api/messages/${encodeURIComponent(room)}`);
         const result = await response.json();
 
+        if (result.dbWarning) {
+          setDbWarning(result.dbWarning);
+        } else {
+          setDbWarning('');
+        }
+
         if (result.success && Array.isArray(result.data)) {
           setMessageList(result.data);
+        } else if (!result.success) {
+          setDbWarning(result.message || 'Database disconnected.');
         }
       } catch (error) {
         console.error('Failed to fetch message history:', error);
+        setDbWarning('Unable to fetch message history.');
       } finally {
         setLoadingHistory(false);
       }
@@ -108,6 +118,14 @@ const ChatRoom = ({ socket, username, room, role }) => {
           </span>
         </div>
       </div>
+
+      {/* Database Warning if Cluster is Paused */}
+      {dbWarning && (
+        <div className="bg-amber-50 text-amber-900 border-b border-amber-200 px-4 py-2 text-xs flex items-center gap-2">
+          <span className="text-amber-600 font-bold">Notice:</span>
+          <span>{dbWarning}</span>
+        </div>
+      )}
 
       {/* Message Feed */}
       <div className="flex-1 overflow-y-auto px-4 py-5 flex flex-col gap-3.5">
