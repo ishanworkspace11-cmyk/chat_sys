@@ -68,7 +68,7 @@ const ProffessorPortal = () => {
 
         {!activeRoom ? (
           <div className="w-full max-w-2xl mx-auto">
-            <h2 className="text-lg font-semibold text-gray-700 mb-4">Manage Broadcast Channels</h2>
+            <h2 className="text-lg font-semibold text-gray-700 mb-4">Manage Academic Channels</h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {['Group A', 'Group B', 'Group C', 'Group D'].map((group) => (
                 <button 
@@ -81,7 +81,7 @@ const ProffessorPortal = () => {
                       <span className="text-lg font-bold text-gray-800 group-hover:text-[#3390EC] transition-colors block">
                         {group}
                       </span>
-                      <span className="text-xs text-gray-400 font-medium mt-1">Official Broadcast Channel</span>
+                      <span className="text-xs text-gray-400 font-medium mt-1">Group Discussion Channel</span>
                     </div>
                     <span className="w-8 h-8 rounded-full bg-blue-50 text-[#3390EC] flex items-center justify-center transition-transform group-hover:translate-x-1 font-semibold">
                       →

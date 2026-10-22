@@ -81,7 +81,7 @@ const StudentPortal = () => {
                       <span className="text-lg font-bold text-gray-800 group-hover:text-[#3390EC] transition-colors block">
                         {group}
                       </span>
-                      <span className="text-xs text-gray-400 font-medium mt-1">Professor Broadcast Feed</span>
+                      <span className="text-xs text-gray-400 font-medium mt-1">Group Discussion & Chat</span>
                     </div>
                     <span className="w-8 h-8 rounded-full bg-blue-50 text-[#3390EC] flex items-center justify-center transition-transform group-hover:translate-x-1 font-semibold">
                       →

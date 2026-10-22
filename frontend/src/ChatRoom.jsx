@@ -73,6 +73,7 @@ const ChatRoom = ({ socket, username, room, role }) => {
     const messageData = {
       room: room,
       author: username || (role === 'prof' ? 'Professor' : 'Student'),
+      role: role || 'member',
       text: trimmed,
       time: formatCurrentTime(),
     };
@@ -103,7 +104,7 @@ const ChatRoom = ({ socket, username, room, role }) => {
           <h2 className="text-lg font-bold text-gray-900 leading-tight truncate">{room}</h2>
           <span className="text-xs text-[#3390EC] font-medium flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-            Official Faculty Broadcast
+            Active Discussion Group
           </span>
         </div>
       </div>
@@ -120,7 +121,7 @@ const ChatRoom = ({ socket, username, room, role }) => {
         ) : messageList.length === 0 ? (
           <div className="flex items-center justify-center h-full">
             <div className="bg-gray-100 border border-gray-200 px-4 py-2 rounded-full text-xs text-gray-500 font-medium">
-              No messages broadcasted yet.
+              No messages here yet. Start the conversation!
             </div>
           </div>
         ) : (
@@ -159,47 +160,36 @@ const ChatRoom = ({ socket, username, room, role }) => {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input or Student Read-Only Notice */}
-      {role === 'prof' ? (
-        <div className="bg-white px-4 py-3 flex items-center gap-2.5 border-t border-gray-200 z-10">
-          <input
-            type="text"
-            value={currentMessage}
-            onChange={(e) => setCurrentMessage(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                sendMessage();
-              }
-            }}
-            placeholder="Broadcast announcement to group..."
-            className="flex-1 bg-gray-100 text-[14px] text-gray-900 rounded-full px-4 py-2.5 outline-none placeholder-gray-500 border border-transparent focus:bg-white focus:border-[#3390EC] focus:ring-2 focus:ring-blue-100 transition-all"
-          />
-          <button 
-            onClick={sendMessage} 
-            disabled={!currentMessage.trim()}
-            title="Send Announcement"
-            className={`rounded-full w-10 h-10 flex items-center justify-center flex-shrink-0 transition-all ${
-              currentMessage.trim() 
-                ? 'bg-[#3390EC] text-white hover:bg-[#287ecf] shadow-md scale-100 cursor-pointer' 
-                : 'bg-gray-200 text-gray-400 cursor-not-allowed scale-95'
-            }`}
-          >
-            <svg className="w-5 h-5 translate-x-[1px]" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"></path>
-            </svg>
-          </button>
-        </div>
-      ) : (
-        <div className="bg-gray-50 px-4 py-4 flex items-center justify-center border-t border-gray-200 z-10">
-          <span className="text-gray-500 text-xs font-medium bg-gray-200/80 px-3.5 py-1.5 rounded-full flex items-center gap-1.5">
-            <svg className="w-3.5 h-3.5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-            </svg>
-            Broadcast-only channel. Only professors can post here.
-          </span>
-        </div>
-      )}
+      {/* Message Input - Open to Everyone (Professors and Students) */}
+      <div className="bg-white px-4 py-3 flex items-center gap-2.5 border-t border-gray-200 z-10">
+        <input
+          type="text"
+          value={currentMessage}
+          onChange={(e) => setCurrentMessage(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              sendMessage();
+            }
+          }}
+          placeholder="Type a message..."
+          className="flex-1 bg-gray-100 text-[14px] text-gray-900 rounded-full px-4 py-2.5 outline-none placeholder-gray-500 border border-transparent focus:bg-white focus:border-[#3390EC] focus:ring-2 focus:ring-blue-100 transition-all"
+        />
+        <button 
+          onClick={sendMessage} 
+          disabled={!currentMessage.trim()}
+          title="Send Message"
+          className={`rounded-full w-10 h-10 flex items-center justify-center flex-shrink-0 transition-all ${
+            currentMessage.trim() 
+              ? 'bg-[#3390EC] text-white hover:bg-[#287ecf] shadow-md scale-100 cursor-pointer' 
+              : 'bg-gray-200 text-gray-400 cursor-not-allowed scale-95'
+          }`}
+        >
+          <svg className="w-5 h-5 translate-x-[1px]" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"></path>
+          </svg>
+        </button>
+      </div>
 
     </div>
   );
